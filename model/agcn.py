@@ -130,7 +130,8 @@ class TCN_GCN_unit(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, num_class=60, num_point=25, num_person=2, graph=None, graph_args=dict(), in_channels=3):
+    def __init__(self, num_class=60, num_point=25, num_person=2, graph=None, graph_args=dict(), in_channels=3,
+                 num_segment = 6, consensus_type='TRNmultiscale'):
         super(Model, self).__init__()
 
         if graph is None:
@@ -152,17 +153,38 @@ class Model(nn.Module):
         self.l8 = TCN_GCN_unit(128, 256, A, stride=2)
         self.l9 = TCN_GCN_unit(256, 256, A)
         self.l10 = TCN_GCN_unit(256, 256, A)
+        
+        self.num_segment = num_segment
 
-        self.fc = nn.Linear(256, num_class)
-        nn.init.normal_(self.fc.weight, 0, math.sqrt(2. / num_class))
+        if consensus_type == 'TRNmultiscale':
+            self.consensus = RelationModuleMultiScale(256, self.num_segment, num_class)
+
+    
+
+        #self.fc = nn.Linear(256, num_class)
+        #nn.init.normal_(self.fc.weight, 0, math.sqrt(2. / num_class))
         bn_init(self.data_bn, 1)
 
     def forward(self, x):
         N, C, T, V, M = x.size()
+        
+        assert T%self.num_segment == 0
+        D = T//self.num_segment
+
+        #x = x.reshape((N,C,6,T//6,V,M))
+        # N C T D V S
+            
+            
 
         x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
         x = self.data_bn(x)
-        x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
+        x = x.view(N, M, V, C, T)
+        x = x.view(N, M, V, C, self.num_segment, D)
+        x = x.permute(0, 4, 1, 3, 5, 2).contiguous()
+        x = x.view(N * self.num_segment * M, C, D, V)
+        
+        
+        #.permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
 
         x = self.l1(x)
         x = self.l2(x)
@@ -175,9 +197,61 @@ class Model(nn.Module):
         x = self.l9(x)
         x = self.l10(x)
 
-        # N*M,C,T,V
+        # N*TT*M,C,T,V
         c_new = x.size(1)
-        x = x.view(N, M, c_new, -1)
-        x = x.mean(3).mean(1)
+        x = x.view(N, self.num_segment, M, c_new, -1)
+        x = x.mean(4).mean(2)
 
-        return self.fc(x)
+        return self.consensus(x)
+class RelationModuleMultiScale(torch.nn.Module):
+    # Temporal Relation module in multiply scale, suming over [2-frame relation, 3-frame relation, ..., n-frame relation]
+
+    def __init__(self, img_feature_dim, num_frames, num_class):
+        super(RelationModuleMultiScale, self).__init__()
+        self.subsample_num = 3 # how many relations selected to sum up
+        self.img_feature_dim = img_feature_dim
+        self.scales = [i for i in range(num_frames, 1, -1)] # generate the multiple frame relations
+
+        self.relations_scales = []
+        self.subsample_scales = []
+        for scale in self.scales:
+            relations_scale = self.return_relationset(num_frames, scale)
+            self.relations_scales.append(relations_scale)
+            self.subsample_scales.append(min(self.subsample_num, len(relations_scale))) # how many samples of relation to select in each forward pass
+
+        self.num_class = num_class
+        self.num_frames = num_frames
+        num_bottleneck = 256
+        self.fc_fusion_scales = nn.ModuleList() # high-tech modulelist
+        for i in range(len(self.scales)):
+            scale = self.scales[i]
+            fc_fusion = nn.Sequential(
+                        nn.ReLU(),
+                        nn.Linear(scale * self.img_feature_dim, num_bottleneck),
+                        nn.ReLU(),
+                        nn.Linear(num_bottleneck, self.num_class),
+                        )
+
+            self.fc_fusion_scales += [fc_fusion]
+
+        print('Multi-Scale Temporal Relation Network Module in use', ['%d-frame relation' % i for i in self.scales])
+
+    def forward(self, input):
+        # the first one is the largest scale
+        act_all = input[:, self.relations_scales[0][0] , :]
+        act_all = act_all.view(act_all.size(0), self.scales[0] * self.img_feature_dim)
+        act_all = self.fc_fusion_scales[0](act_all)
+
+        for scaleID in range(1, len(self.scales)):
+            # iterate over the scales
+            idx_relations_randomsample = np.random.choice(len(self.relations_scales[scaleID]), self.subsample_scales[scaleID], replace=False)
+            for idx in idx_relations_randomsample:
+                act_relation = input[:, self.relations_scales[scaleID][idx], :]
+                act_relation = act_relation.view(act_relation.size(0), self.scales[scaleID] * self.img_feature_dim)
+                act_relation = self.fc_fusion_scales[scaleID](act_relation)
+                act_all += act_relation
+        return act_all
+
+    def return_relationset(self, num_frames, num_frames_relation):
+        import itertools
+        return list(itertools.combinations([i for i in range(num_frames)], num_frames_relation))

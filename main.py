@@ -21,6 +21,7 @@ from tensorboardX import SummaryWriter
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import _LRScheduler
 from tqdm import tqdm
+from model.agcn import Model
 
 
 class GradualWarmupScheduler(_LRScheduler):
@@ -198,7 +199,8 @@ class Processor():
             if not arg.train_feeder_args['debug']:
                 if os.path.isdir(arg.model_saved_name):
                     print('log_dir: ', arg.model_saved_name, 'already exist')
-                    answer = input('delete it? y/n:')
+                    #answer = input('delete it? y/n:')
+                    answer = 'n'
                     if answer == 'y':
                         shutil.rmtree(arg.model_saved_name)
                         print('Dir removed: ', arg.model_saved_name)
@@ -217,7 +219,8 @@ class Processor():
         self.best_acc = 0
 
     def load_data(self):
-        Feeder = import_class(self.arg.feeder)
+        from feeders.feeder import Feeder
+        #Feeder = import_class(self.arg.feeder)
         self.data_loader = dict()
         if self.arg.phase == 'train':
             self.data_loader['train'] = torch.utils.data.DataLoader(
@@ -238,9 +241,9 @@ class Processor():
     def load_model(self):
         output_device = self.arg.device[0] if type(self.arg.device) is list else self.arg.device
         self.output_device = output_device
-        Model = import_class(self.arg.model)
-        shutil.copy2(inspect.getfile(Model), self.arg.work_dir)
-        print(Model)
+        #Model = import_class(self.arg.model)
+        #shutil.copy2(inspect.getfile(Model), self.arg.work_dir)
+        #print(Model)
         self.model = Model(**self.arg.model_args).cuda(output_device)
         print(self.model)
         self.loss = nn.CrossEntropyLoss().cuda(output_device)
@@ -379,6 +382,8 @@ class Processor():
         for batch_idx, (data, label, index) in enumerate(process):
             self.global_step += 1
             # get data
+            
+            
             data = Variable(data.float().cuda(self.output_device), requires_grad=False)
             label = Variable(label.long().cuda(self.output_device), requires_grad=False)
             timer['dataloader'] += self.split_time()
