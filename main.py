@@ -250,6 +250,7 @@ class Processor():
 
         if self.arg.weights:
             self.global_step = int(arg.weights[:-3].split('-')[-1])
+            self.arg.start_epoch = int(int(arg.weights[:-3].split('-')[-2]))
             self.print_log('Load weights from {}.'.format(self.arg.weights))
             if '.pkl' in self.arg.weights:
                 with open(self.arg.weights, 'r') as f:
