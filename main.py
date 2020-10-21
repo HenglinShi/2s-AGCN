@@ -219,8 +219,8 @@ class Processor():
         self.best_acc = 0
 
     def load_data(self):
-        from feeders.feeder import Feeder
-        #Feeder = import_class(self.arg.feeder)
+        #from feeders.feeder import Feeder
+        Feeder = import_class(self.arg.feeder)
         self.data_loader = dict()
         if self.arg.phase == 'train':
             self.data_loader['train'] = torch.utils.data.DataLoader(
@@ -357,7 +357,7 @@ class Processor():
 
     def train(self, epoch, save_model=False):
         self.model.train()
-        self.print_log('Training epoch: {}'.format(epoch + 1))
+        self.print_log('Training epoch: {}, '.format(epoch + 1) + 'LR is: ' + str(self.optimizer.param_groups[0]['lr']))
         loader = self.data_loader['train']
         self.adjust_learning_rate(epoch)
         # for name, param in self.model.named_parameters():

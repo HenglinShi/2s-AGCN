@@ -166,22 +166,23 @@ class Model(nn.Module):
         bn_init(self.data_bn, 1)
 
     def forward(self, x):
-        N, C, T, V, M = x.size()
+        #N, C, T, V, M = x.size()
+        N, C, T, D, V, M = x.size()
         
-        assert T%self.num_segment == 0
-        D = T//self.num_segment
+        #assert T%self.num_segment == 0
+        #D = T//self.num_segment
 
         #x = x.reshape((N,C,6,T//6,V,M))
         # N C T D V S
             
-            
-
-        x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
+        # N C T D V M to N (M V C) (T D)    
+        x = x.permute(0, 5, 4, 1, 2, 3).contiguous().view(N, M * V * C, T * D)
+        #x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
         x = self.data_bn(x)
-        x = x.view(N, M, V, C, T)
-        x = x.view(N, M, V, C, self.num_segment, D)
+        x = x.view(N, M, V, C, T, D)
+        #x = x.view(N, M, V, C, self.num_segment, D)
         x = x.permute(0, 4, 1, 3, 5, 2).contiguous()
-        x = x.view(N * self.num_segment * M, C, D, V)
+        x = x.view(N * T * M, C, D, V)
         
         
         #.permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
@@ -199,7 +200,7 @@ class Model(nn.Module):
 
         # N*TT*M,C,T,V
         c_new = x.size(1)
-        x = x.view(N, self.num_segment, M, c_new, -1)
+        x = x.view(N, T, M, c_new, -1)
         x = x.mean(4).mean(2)
 
         return self.consensus(x)
